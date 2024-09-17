@@ -80,7 +80,7 @@ class Mapillary_SemSeg_Dataset(Dataset):
             image = transformed['image']
             mask = transformed['mask']
         
-        return image.transpose(2, 0, 1), mask.transpose(2, 0, 1)
+        return image.transpose(2, 0, 1).astype(np.float32)/255, mask.transpose(2, 0, 1).astype(np.float32)
 
 
 if __name__ == '__main__':
