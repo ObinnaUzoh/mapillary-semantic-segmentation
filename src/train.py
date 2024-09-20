@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import uuid
 import random
 import sys
 import torch
@@ -20,7 +21,7 @@ from .utils.dice_score import dice_loss
 
 from .dataset.mapillary_dataset import Mapillary_SemSeg_Dataset, N_LABELS
 
-dir_checkpoint = Path('./checkpoints/')
+dir_checkpoint = Path(f'./checkpoints/{uuid.uuid4()}')
 
 
 def train_model(
@@ -42,7 +43,7 @@ def train_model(
     val_dataset = Mapillary_SemSeg_Dataset('validation', './data', (image_height, image_width), augment=False, verbose=False)
 
     # 3. Create data loaders
-    loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
+    loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count()//2, pin_memory=True)
     train_loader = DataLoader(train_dataset, shuffle=True, **loader_args)
     val_loader = DataLoader(val_dataset, shuffle=False, drop_last=True, **loader_args)
 
@@ -51,7 +52,7 @@ def train_model(
     experiment = wandb.init(project='mapillary')
     experiment.config.update(
         dict(model='UNET', epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-             save_checkpoint=save_checkpoint, image_height=image_height, image_width=image_width, amp=amp)
+             save_checkpoint=save_checkpoint, image_height=image_height, image_width=image_width, amp=amp, dir_checkpoint=dir_checkpoint)
     )
 
     logging.info(f'''Starting training:
@@ -65,6 +66,7 @@ def train_model(
         Image height:  {image_height}
         Image width:  {image_width}
         Mixed Precision: {amp}
+        Checkpoint dir: {dir_checkpoint}
     ''')
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
@@ -156,7 +158,6 @@ def train_model(
         if save_checkpoint:
             Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
             state_dict = model.state_dict()
-            state_dict['mask_values'] = dataset.mask_values
             torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
             logging.info(f'Checkpoint {epoch} saved!')
 
@@ -217,6 +218,7 @@ if __name__ == '__main__':
         logging.error('Detected OutOfMemoryError! '
                       'Enabling checkpointing to reduce memory usage, but this slows down training. '
                       'Consider enabling AMP (--amp) for fast and memory efficient training')
+        exit(1)
         torch.cuda.empty_cache()
         model.use_checkpointing()
         train_model(

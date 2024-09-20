@@ -7,6 +7,8 @@ import numpy as np
 import albumentations as A
 
 N_LABELS = 124
+TEST_SPLIT_FROM_TRAIN = 0.05
+TRAIN_SPLIT_FROM_TRAIN = 1-TEST_SPLIT_FROM_TRAIN
 
 def make_augmentations(image_height, image_width, random_crop_min=0.6, p=0.5):
     random_crop_ratio = random_crop_min + random.random()*(1-random_crop_min)
@@ -37,9 +39,20 @@ class Mapillary_SemSeg_Dataset(Dataset):
     def __init__(self, split, data_dir, image_shape, augment=False, version='v2.0', verbose=False):
         self.data_dir = data_dir
         self.version = version
-        self.split = split
+        if split == 'testing':
+            self.split = 'training'
+        else:
+            self.split = split 
         self.image_height, self.image_width = image_shape
-        self.image_filenames = os.listdir(os.path.join(self.data_dir, f'{split}/images'))
+        self.image_filenames = os.listdir(os.path.join(self.data_dir, f'{self.split}/images'))
+        if split=='testing' or split=='training':
+            random.seed(0)
+            self.image_filenames.sort()
+            random.shuffle(self.image_filenames)
+            if split=='training':
+                self.image_filenames = self.image_filenames[:int(len(self.image_filenames)*TRAIN_SPLIT_FROM_TRAIN)]
+            else:
+                self.image_filenames = self.image_filenames[int(len(self.image_filenames)*TRAIN_SPLIT_FROM_TRAIN):]
         self.augment = augment
         self.verbose = verbose
         if self.augment:
