@@ -17,17 +17,29 @@ from tqdm import tqdm
 import wandb
 from .evaluate import evaluate
 from .models import UNet
-from .utils.dice_score import dice_loss
+from .losses_and_metrics import CRITERIA
 
 from .dataset.mapillary_dataset import Mapillary_SemSeg_Dataset, N_LABELS
 
 dir_checkpoint = Path(f'./checkpoints/{uuid.uuid4()}')
 
-def train_one_epoch(model, train_dataset, train_loader, optimizer, scheduler, grad_scaler, criterion, experiment, epoch):
+def train_and_val_one_epoch(model, 
+    train_dataset, 
+    train_loader, 
+    val_loader,
+    optimizer, 
+    scheduler, 
+    grad_scaler, 
+    gradient_clipping,
+    criterion, 
+    experiment, 
+    amp, 
+    save_checkpoint,
+    epoch):
     model.train()
     epoch_loss = 0
     epoch_total_samples = 0
-    with tqdm(total=len(train_dataset), desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
+    with tqdm(total=len(train_dataset), desc=f'Epoch {epoch}', unit='img') as pbar:
         for images, true_masks in train_loader:
             assert images.shape[1] == model.n_channels, \
                 f'Network has been defined with {model.n_channels} input channels, ' \
@@ -39,18 +51,8 @@ def train_one_epoch(model, train_dataset, train_loader, optimizer, scheduler, gr
 
             with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                 masks_pred = model(images)
-                if model.n_classes == 1:
-                    loss = criterion(masks_pred.squeeze(1), true_masks.float())
-                    loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
-                else:
-                    loss = criterion(masks_pred, true_masks.float())
-                    loss += dice_loss(
-                        F.softmax(masks_pred, dim=1).float(),
-                        true_masks.float(),
 
-                        # F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(),
-                        multiclass=True
-                    )
+                loss = criterion(masks_pred, true_masks.float())
 
             optimizer.zero_grad(set_to_none=True)
             grad_scaler.scale(loss).backward()
@@ -60,7 +62,6 @@ def train_one_epoch(model, train_dataset, train_loader, optimizer, scheduler, gr
             grad_scaler.update()
 
             pbar.update(images.shape[0])
-            global_step += 1
             epoch_loss += loss.item()
             epoch_total_samples+= images.shape[0]
             pbar.set_postfix(**{'loss (batch)': loss.item()})
@@ -80,7 +81,7 @@ def train_one_epoch(model, train_dataset, train_loader, optimizer, scheduler, gr
         'validation Dice': val_score,
         'images': wandb.Image(images[0].cpu()),
         'masks': {
-            'true': wandb.Image(true_masks[0].float().cpu()),
+            'true': wandb.Image(true_masks.argmax(dim=1)[0].float().cpu()),
             'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
         },
         'epoch': epoch,
@@ -102,6 +103,7 @@ def train_model(
         save_checkpoint: bool = True,
         image_height: int = 512,
         image_width: int = 512,
+        criterion: str = 'cross_entropy_plus_dice_loss',
         amp: bool = False,
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
@@ -121,7 +123,9 @@ def train_model(
     experiment = wandb.init(project='mapillary')
     experiment.config.update(
         dict(model='UNET', epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-             save_checkpoint=save_checkpoint, image_height=image_height, image_width=image_width, amp=amp, dir_checkpoint=dir_checkpoint)
+             save_checkpoint=save_checkpoint, image_height=image_height, image_width=image_width, amp=amp, 
+             dir_checkpoint=dir_checkpoint,
+             criterion=criterion)
     )
 
     logging.info(f'''Starting training:
@@ -143,12 +147,28 @@ def train_model(
                               lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
-    global_step = 0
+    try:
+        criterion_obj = CRITERIA[criterion]
+    except keyError:
+        logger.error(f'Unimplemented criterion {criterion}')
+        raise keyError
+
+    train_val_args = dict(model=model, 
+        train_dataset=train_dataset, 
+        train_loader=train_loader, 
+        val_loader=val_loader, 
+        optimizer=optimizer, 
+        scheduler=scheduler, 
+        grad_scaler=grad_scaler,  
+        gradient_clipping=gradient_clipping, 
+        criterion=criterion_obj, 
+        experiment=experiment, 
+        amp=amp, 
+        save_checkpoint=save_checkpoint)
 
     # 5. Begin training
     for epoch in range(1, epochs + 1):
-        train_one_epoch(model, train_dataset, train_loader, optimizer, scheduler, grad_scaler, criterion, experiment, epoch)
+        train_and_val_one_epoch(**train_val_args, epoch=epoch)
         
 def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
@@ -162,6 +182,7 @@ def get_args():
 
     parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
+    parser.add_argument('--criterion', '-c', type=str, default='cross_entropy_plus_dice_loss', help='loss function for training')
 
     return parser.parse_args()
 
@@ -199,22 +220,11 @@ if __name__ == '__main__':
             device=device,
             image_height=args.image_height,
             image_width=args.image_width,
+            criterion=args.criterion,
             amp=args.amp
         )
     except torch.cuda.OutOfMemoryError:
         logging.error('Detected OutOfMemoryError! '
-                      'Enabling checkpointing to reduce memory usage, but this slows down training. '
                       'Consider enabling AMP (--amp) for fast and memory efficient training')
-        exit(1)
-        torch.cuda.empty_cache()
-        model.use_checkpointing()
-        train_model(
-            model=model,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.lr,
-            device=device,
-            image_height=args.image_height,
-            image_width=args.image_width,
-            amp=args.amp
-        )
+        raise RuntimeError('CUDA OOM')
+        

@@ -36,7 +36,7 @@ def make_augmentations(image_height, image_width, random_crop_min=0.6, p=0.5):
     return weak_transform, strong_transform
 
 class Mapillary_SemSeg_Dataset(Dataset):
-    def __init__(self, split, data_dir, image_shape, augment=False, version='v2.0', verbose=False):
+    def __init__(self, split, data_dir, image_shape, augment=False, version='v2.0', verbose=False, max_length=None):
         self.data_dir = data_dir
         self.version = version
         if split == 'testing':
@@ -53,6 +53,8 @@ class Mapillary_SemSeg_Dataset(Dataset):
                 self.image_filenames = self.image_filenames[:int(len(self.image_filenames)*TRAIN_SPLIT_FROM_TRAIN)]
             else:
                 self.image_filenames = self.image_filenames[int(len(self.image_filenames)*TRAIN_SPLIT_FROM_TRAIN):]
+        if max_length is not None:
+            self.image_filenames = self.image_filenames[:max_length]
         self.augment = augment
         self.verbose = verbose
         if self.augment:
