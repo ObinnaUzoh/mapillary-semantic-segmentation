@@ -23,6 +23,75 @@ from .dataset.mapillary_dataset import Mapillary_SemSeg_Dataset, N_LABELS
 
 dir_checkpoint = Path(f'./checkpoints/{uuid.uuid4()}')
 
+def train_one_epoch(model, train_dataset, train_loader, optimizer, scheduler, grad_scaler, criterion, experiment, epoch):
+    model.train()
+    epoch_loss = 0
+    epoch_total_samples = 0
+    with tqdm(total=len(train_dataset), desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
+        for images, true_masks in train_loader:
+            assert images.shape[1] == model.n_channels, \
+                f'Network has been defined with {model.n_channels} input channels, ' \
+                f'but loaded images have {images.shape[1]} channels. Please check that ' \
+                'the images are loaded correctly.'
+
+            images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
+            true_masks = true_masks.to(device=device, dtype=torch.long)
+
+            with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
+                masks_pred = model(images)
+                if model.n_classes == 1:
+                    loss = criterion(masks_pred.squeeze(1), true_masks.float())
+                    loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
+                else:
+                    loss = criterion(masks_pred, true_masks.float())
+                    loss += dice_loss(
+                        F.softmax(masks_pred, dim=1).float(),
+                        true_masks.float(),
+
+                        # F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(),
+                        multiclass=True
+                    )
+
+            optimizer.zero_grad(set_to_none=True)
+            grad_scaler.scale(loss).backward()
+            grad_scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+            grad_scaler.step(optimizer)
+            grad_scaler.update()
+
+            pbar.update(images.shape[0])
+            global_step += 1
+            epoch_loss += loss.item()
+            epoch_total_samples+= images.shape[0]
+            pbar.set_postfix(**{'loss (batch)': loss.item()})
+
+    experiment.log({
+        'train loss': epoch_loss/epoch_total_samples,
+        'epoch': epoch
+    })
+    
+    # Evaluation round
+    val_score = evaluate(model, val_loader, device, amp)
+    scheduler.step(val_score)
+
+    logging.info('Validation Dice score: {}'.format(val_score))
+    experiment.log({
+        'learning rate': optimizer.param_groups[0]['lr'],
+        'validation Dice': val_score,
+        'images': wandb.Image(images[0].cpu()),
+        'masks': {
+            'true': wandb.Image(true_masks[0].float().cpu()),
+            'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
+        },
+        'epoch': epoch,
+    })
+
+    if save_checkpoint:
+        Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
+        state_dict = model.state_dict()
+        torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
+        logging.info(f'Checkpoint {epoch} saved!')
+
 
 def train_model(
         model,
@@ -79,89 +148,8 @@ def train_model(
 
     # 5. Begin training
     for epoch in range(1, epochs + 1):
-        model.train()
-        epoch_loss = 0
-        with tqdm(total=len(train_dataset), desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
-            for images, true_masks in train_loader:
-                assert images.shape[1] == model.n_channels, \
-                    f'Network has been defined with {model.n_channels} input channels, ' \
-                    f'but loaded images have {images.shape[1]} channels. Please check that ' \
-                    'the images are loaded correctly.'
-
-                images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
-                true_masks = true_masks.to(device=device, dtype=torch.long)
-
-                with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
-                    masks_pred = model(images)
-                    if model.n_classes == 1:
-                        loss = criterion(masks_pred.squeeze(1), true_masks.float())
-                        loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
-                    else:
-                        loss = criterion(masks_pred, true_masks.float())
-                        loss += dice_loss(
-                            F.softmax(masks_pred, dim=1).float(),
-                            true_masks.float(),
-
-                            # F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(),
-                            multiclass=True
-                        )
-
-                optimizer.zero_grad(set_to_none=True)
-                grad_scaler.scale(loss).backward()
-                grad_scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
-                grad_scaler.step(optimizer)
-                grad_scaler.update()
-
-                pbar.update(images.shape[0])
-                global_step += 1
-                epoch_loss += loss.item()
-                experiment.log({
-                    'train loss': loss.item(),
-                    'step': global_step,
-                    'epoch': epoch
-                })
-                pbar.set_postfix(**{'loss (batch)': loss.item()})
-
-                # Evaluation round
-                division_step = (len(train_dataset) // (5 * batch_size))
-                if division_step > 0:
-                    if global_step % division_step == 0:
-                        histograms = {}
-                        for tag, value in model.named_parameters():
-                            tag = tag.replace('/', '.')
-                            if not (torch.isinf(value) | torch.isnan(value)).any():
-                                histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
-                            if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
-                                histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
-
-                        val_score = evaluate(model, val_loader, device, amp)
-                        scheduler.step(val_score)
-
-                        logging.info('Validation Dice score: {}'.format(val_score))
-                        try:
-                            experiment.log({
-                                'learning rate': optimizer.param_groups[0]['lr'],
-                                'validation Dice': val_score,
-                                'images': wandb.Image(images[0].cpu()),
-                                'masks': {
-                                    'true': wandb.Image(true_masks[0].float().cpu()),
-                                    'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
-                                },
-                                'step': global_step,
-                                'epoch': epoch,
-                                **histograms
-                            })
-                        except:
-                            pass
-
-        if save_checkpoint:
-            Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
-            state_dict = model.state_dict()
-            torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
-            logging.info(f'Checkpoint {epoch} saved!')
-
-
+        train_one_epoch(model, train_dataset, train_loader, optimizer, scheduler, grad_scaler, criterion, experiment, epoch)
+        
 def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
     parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
@@ -198,7 +186,6 @@ if __name__ == '__main__':
 
     if args.load:
         state_dict = torch.load(args.load, map_location=device)
-        del state_dict['mask_values']
         model.load_state_dict(state_dict)
         logging.info(f'Model loaded from {args.load}')
 
