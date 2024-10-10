@@ -6,7 +6,8 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import albumentations as A
 
-N_LABELS = 124
+N_LABELS_v1_2 = 66
+N_LABELS_v2 = 124
 TEST_SPLIT_FROM_TRAIN = 0.05
 TRAIN_SPLIT_FROM_TRAIN = 1-TEST_SPLIT_FROM_TRAIN
 
@@ -36,7 +37,7 @@ def make_augmentations(image_height, image_width, random_crop_min=0.6, p=0.5):
     return weak_transform, strong_transform
 
 class Mapillary_SemSeg_Dataset(Dataset):
-    def __init__(self, split, data_dir, image_shape, augment=False, version='v2.0', verbose=False, max_length=None):
+    def __init__(self, split, data_dir, image_shape, augment=False, version='v1.2', verbose=False, max_length=None):
         self.data_dir = data_dir
         self.version = version
         if split == 'testing':
@@ -72,9 +73,9 @@ class Mapillary_SemSeg_Dataset(Dataset):
         image = np.array(Image.open(image_path).resize((self.image_width, self.image_height)))
         label = np.array(Image.open(label_path).resize((self.image_width, self.image_height), Image.NEAREST))
 
-        mask = np.zeros((*label.shape, N_LABELS))
+        mask = np.zeros((*label.shape, N_LABELS_v1_2))
 
-        for j in range(N_LABELS):
+        for j in range(N_LABELS_v1_2):
             mask[:, :, j][label == j] = 1
 
         if self.augment:

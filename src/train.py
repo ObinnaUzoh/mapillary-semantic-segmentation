@@ -19,7 +19,7 @@ from .evaluate import evaluate
 from .models import UNet
 from .losses_and_metrics import CRITERIA
 
-from .dataset.mapillary_dataset import Mapillary_SemSeg_Dataset, N_LABELS
+from .dataset.mapillary_dataset import Mapillary_SemSeg_Dataset, N_LABELS_v1_2
 
 dir_checkpoint = Path(f'./checkpoints/{uuid.uuid4()}')
 
@@ -34,6 +34,7 @@ def train_and_val_one_epoch(model,
     criterion, 
     experiment, 
     amp, 
+    best_val_score,
     save_checkpoint,
     epoch):
     model.train()
@@ -72,9 +73,8 @@ def train_and_val_one_epoch(model,
     })
     
     # Evaluation round
-    val_score = evaluate(model, val_loader, device, amp)
+    val_score = evaluate(model, val_loader, device, amp) 
     scheduler.step(val_score)
-
     logging.info('Validation Dice score: {}'.format(val_score))
     experiment.log({
         'learning rate': optimizer.param_groups[0]['lr'],
@@ -87,14 +87,15 @@ def train_and_val_one_epoch(model,
         'epoch': epoch,
     })
 
-    if save_checkpoint:
+    if save_checkpoint and val_score > best_val_score:
         Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
         state_dict = model.state_dict()
         torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
         logging.info(f'Checkpoint {epoch} saved!')
 
+    return max(val_score, best_val_score)
 
-def train_model(
+def train_eval_model(
         model,
         device,
         epochs: int = 5,
@@ -164,12 +165,29 @@ def train_model(
         criterion=criterion_obj, 
         experiment=experiment, 
         amp=amp, 
+        best_val_score=-float('inf'),
         save_checkpoint=save_checkpoint)
+
+    best_val_epoch = None
+    best_val_score = -float('inf')
 
     # 5. Begin training
     for epoch in range(1, epochs + 1):
-        train_and_val_one_epoch(**train_val_args, epoch=epoch)
-        
+        new_best_val_score = train_and_val_one_epoch(**train_val_args, epoch=epoch)
+        if new_best_val_score > best_val_score:
+            best_val_score = new_best_val_score
+            best_val_epoch = epoch
+            train_val_args['best_val_score'] = best_val_score
+
+    # Evaluate best model on test data at the end
+    test_dataset = Mapillary_SemSeg_Dataset('testing', './data', (image_height, image_width), augment=False, verbose=False)
+    test_loader = DataLoader(test_dataset, shuffle=False, drop_last=True, **loader_args)
+    state_dict = torch.load(f'{dir_checkpoint}/checkpoint_epoch{best_val_epoch}.pth', weights_only=True, map_location=device)
+    model.load_state_dict(state_dict)
+    test_score = evaluate(model, test_loader, device, amp)
+
+    experiment.config.update(dict(best_val_epoch=best_val_epoch, best_val_score=best_val_score, test_score=test_score))
+
 def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
     parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
@@ -197,7 +215,7 @@ if __name__ == '__main__':
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
-    model = UNet(n_channels=3, n_classes=N_LABELS, bilinear=args.bilinear)
+    model = UNet(n_channels=3, n_classes=N_LABELS_v1_2, bilinear=args.bilinear)
     model = model.to(memory_format=torch.channels_last)
 
     logging.info(f'Network:\n'
@@ -212,7 +230,7 @@ if __name__ == '__main__':
 
     model.to(device=device)
     try:
-        train_model(
+        train_eval_model(
             model=model,
             epochs=args.epochs,
             batch_size=args.batch_size,
