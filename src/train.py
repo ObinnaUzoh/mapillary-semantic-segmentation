@@ -17,6 +17,7 @@ from tqdm import tqdm
 import wandb
 from .evaluate import evaluate
 from .models import UNet
+from .models.deeplabv3_model import DeepLabV3
 from .losses_and_metrics import CRITERIA
 
 from .dataset.mapillary_dataset import Mapillary_SemSeg_Dataset, N_LABELS_v1_2
@@ -189,7 +190,9 @@ def train_eval_model(
     experiment.config.update(dict(best_val_epoch=best_val_epoch, best_val_score=best_val_score, test_score=test_score))
 
 def get_args():
-    parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
+    # parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
+    parser = argparse.ArgumentParser(description='Train the model on images and target masks')
+    parser.add_argument('--model_name', '-mn', metavar='MN', type=str, default='unet', help='Model type, either "unet" or "deeplabv3"')
     parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
     parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='B', type=int, default=8, help='Batch size')
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=1e-5,
@@ -212,16 +215,21 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
-    # Change here to adapt to your data
-    # n_channels=3 for RGB images
-    # n_classes is the number of probabilities you want to get per pixel
-    model = UNet(n_channels=3, n_classes=N_LABELS_v1_2, bilinear=args.bilinear)
-    model = model.to(memory_format=torch.channels_last)
+    if args.model_name == 'unet':
 
-    logging.info(f'Network:\n'
-                 f'\t{model.n_channels} input channels\n'
-                 f'\t{model.n_classes} output channels (classes)\n'
-                 f'\t{"Bilinear" if model.bilinear else "Transposed conv"} upscaling')
+        # Change here to adapt to your data
+        # n_channels=3 for RGB images
+        # n_classes is the number of probabilities you want to get per pixel
+        model = UNet(n_channels=3, n_classes=N_LABELS_v1_2, bilinear=args.bilinear)
+        model = model.to(memory_format=torch.channels_last)
+
+        logging.info(f'Network:\n'
+                    f'\t{model.n_channels} input channels\n'
+                    f'\t{model.n_classes} output channels (classes)\n'
+                    f'\t{"Bilinear" if model.bilinear else "Transposed conv"} upscaling')
+
+    if args.model_name == 'deeplabv3':
+        model = DeepLabV3(model_id = 1, project_dir="..")
 
     if args.load:
         state_dict = torch.load(args.load, map_location=device)

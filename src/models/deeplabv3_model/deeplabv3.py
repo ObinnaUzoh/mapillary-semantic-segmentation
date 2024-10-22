@@ -37,7 +37,7 @@ class DeepLabV3(nn.Module):
         return output
 
     def create_model_dirs(self):
-        self.logs_dir = self.project_dir + "/training_logs"
+        self.logs_dir = self.project_dir + "/deeplabv3_training_logs"
         self.model_dir = self.logs_dir + "/model_%s" % self.model_id
         self.checkpoints_dir = self.model_dir + "/checkpoints"
         if not os.path.exists(self.logs_dir):
