@@ -2,6 +2,10 @@
 
 # NOTE! OS: output stride, the ratio of input image resolution to final output resolution (OS16: output size is (img_h/16, img_w/16)) (OS8: output size is (img_h/8, img_w/8))
 
+import os
+
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -176,7 +180,11 @@ class ResNet_BasicBlock_OS8(nn.Module):
         if num_layers == 18:
             resnet = models.resnet18()
             # load pretrained model:
-            resnet.load_state_dict(torch.load("/root/deeplabv3/pretrained_models/resnet/resnet18-5c106cde.pth"))
+            # resnet_pretrained_models = "../src/models/deeplabv3_model/pretrained_resnet/"
+            # pretrained_models = os.path.join(resnet_pretrained_models, "resnet18-5c106cde.pth")
+            # print(os.listdir(pretrained_models))
+            resnet.load_state_dict(torch.load("../src/models/deeplabv3_model/pretrained_resnet/resnet18-5c106cde.pth", weights_only=True))
+            # resnet.load_state_dict(torch.load("/resnet18-5c106cde.pth"))
             # remove fully connected layer, avg pool, layer4 and layer5:
             self.resnet = nn.Sequential(*list(resnet.children())[:-4])
 

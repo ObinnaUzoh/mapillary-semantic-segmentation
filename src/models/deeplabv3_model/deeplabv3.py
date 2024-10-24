@@ -6,8 +6,8 @@ import torch.nn.functional as F
 
 import os
 
-from resnet import ResNet18_OS16, ResNet34_OS16, ResNet50_OS16, ResNet101_OS16, ResNet152_OS16, ResNet18_OS8, ResNet34_OS8
-from aspp import ASPP, ASPP_Bottleneck
+from .resnet import ResNet18_OS16, ResNet34_OS16, ResNet50_OS16, ResNet101_OS16, ResNet152_OS16, ResNet18_OS8, ResNet34_OS8
+from .aspp import ASPP, ASPP_Bottleneck
 
 class DeepLabV3(nn.Module):
     def __init__(self,  n_channels, n_classes, model_id, project_dir):
