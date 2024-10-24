@@ -25,6 +25,7 @@ from .dataset.mapillary_dataset import Mapillary_SemSeg_Dataset, N_LABELS_v1_2
 dir_checkpoint = Path(f'./checkpoints/{uuid.uuid4()}')
 
 def train_and_val_one_epoch(model, 
+    model_name,
     train_dataset, 
     train_loader, 
     val_loader,
@@ -98,6 +99,7 @@ def train_and_val_one_epoch(model,
 
 def train_eval_model(
         model,
+        model_name,
         device,
         epochs: int = 5,
         batch_size: int = 1,
@@ -124,13 +126,14 @@ def train_eval_model(
     wandb.login()
     experiment = wandb.init(project='mapillary')
     experiment.config.update(
-        dict(model='UNET', epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
+        dict(model_name=model_name, epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
              save_checkpoint=save_checkpoint, image_height=image_height, image_width=image_width, amp=amp, 
              dir_checkpoint=dir_checkpoint,
              criterion=criterion)
     )
 
     logging.info(f'''Starting training:
+        Model name:      {model_name}
         Epochs:          {epochs}
         Batch size:      {batch_size}
         Learning rate:   {learning_rate}
@@ -156,6 +159,7 @@ def train_eval_model(
         raise keyError
 
     train_val_args = dict(model=model, 
+        model_name = model_name,
         train_dataset=train_dataset, 
         train_loader=train_loader, 
         val_loader=val_loader, 
@@ -229,7 +233,8 @@ if __name__ == '__main__':
                     f'\t{"Bilinear" if model.bilinear else "Transposed conv"} upscaling')
 
     if args.model_name == 'deeplabv3':
-        model = DeepLabV3(model_id = 1, project_dir="..")
+        model = DeepLabV3(n_channels=3, n_classes=N_LABELS_v1_2, model_id = 1, project_dir="..")
+        model = model.to(memory_format=torch.channels_last)
 
     if args.load:
         state_dict = torch.load(args.load, map_location=device)
@@ -240,6 +245,7 @@ if __name__ == '__main__':
     try:
         train_eval_model(
             model=model,
+            model_name = args.model_name,
             epochs=args.epochs,
             batch_size=args.batch_size,
             learning_rate=args.lr,
