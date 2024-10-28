@@ -183,7 +183,7 @@ class ResNet_BasicBlock_OS8(nn.Module):
             # resnet_pretrained_models = "../src/models/deeplabv3_model/pretrained_resnet/"
             # pretrained_models = os.path.join(resnet_pretrained_models, "resnet18-5c106cde.pth")
             # print(os.listdir(pretrained_models))
-            resnet.load_state_dict(torch.load("../src/models/deeplabv3_model/pretrained_resnet/resnet18-5c106cde.pth", weights_only=True))
+            resnet.load_state_dict(torch.load("/home/uzohchinedu/mapillary/src/models/deeplabv3_model/pretrained_resnet/resnet18-5c106cde.pth", weights_only=True))
             # resnet.load_state_dict(torch.load("/resnet18-5c106cde.pth"))
             # remove fully connected layer, avg pool, layer4 and layer5:
             self.resnet = nn.Sequential(*list(resnet.children())[:-4])
