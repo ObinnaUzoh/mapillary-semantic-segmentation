@@ -6,16 +6,11 @@ Semantic segmentation of street‐level imagery using DeepLabV3 and U‑Net arch
 
 ## 📋 Table of Contents
 
-- [Overview](#overview)
-<!-- - [Features](#features) -->
+- [Overview](##Overview)
 - [Repository Structure](#repository-structure)
 - [Installation](#installation)
-- [Dataset Preparation](#dataset-preparation)
-- [Usage](#usage)
-  - [Inference](#inference)
-  - [Visualization](#visualization)
+- [Dataset Preparation and Visualization](#dataset-preparation)
 - [Training](#training)
-- [Evaluation](#evaluation)
 - [Model Architectures](#model-architectures)
 - [Utilities](#utilities)
 - [Contributing](#contributing)
@@ -47,7 +42,7 @@ I have written a comprehensive report of the architectures used and the result o
 
 ```
 mapillary-semantic-segmentation/
-├── data                               # Mapillary data, download here https://www.mapillary.com/dataset/vistas
+├── data                               # Create this folder with Mapillary data, download from https://www.mapillary.com/dataset/vistas
 ├── notebooks/                         # Jupyter notebooks for analysis and visualization
 │   ├── basic_stats.ipynb              # Exploratory statistics notebook to obtain image class distributions
 │   ├── class_distribution_v2.0.json   # Class distribution output data
@@ -73,7 +68,7 @@ mapillary-semantic-segmentation/
 │       ├── dice_score.py             # Dice coefficient implementation
 │       ├── losses_and_metrics.py     # Loss functions and metrics
 │       ├── evaluate.py               # Evaluation script
-│       └── train.py                  # Training script
+│       └── train.py                  # Training script, main file
 └── README.md                         # (this file)
 ```
 
@@ -106,15 +101,11 @@ mapillary-semantic-segmentation/
    ```
 
 
-## 🗄️ Dataset Preparation
+## 🗄️ Dataset Preparation and Visualization
 
-**Download** the Mapillary Vistas dataset following the [official instructions](https://www.mapillary.com/dataset/vistas).
-
-
-## Data Visualization
-
-**Inspect and run** the notebook `basic_stats.ipynb` to obtain basic statatics like the size of the images and the class distribution   
-
+1. **Download** the Mapillary Vistas dataset following the [official instructions](https://www.mapillary.com/dataset/vistas).
+2. **Inspect and run** the notebook `basic_stats.ipynb` to obtain basic statatics like the size of the images and the class distribution.
+     
 
 ## 🏋️ Training
 
